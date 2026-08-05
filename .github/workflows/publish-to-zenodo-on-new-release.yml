@@ -5,95 +5,36 @@ on:
     types: [published]
 
 jobs:
-  publish:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+  deploy:
+    runs-on: ubuntu-20.04
+
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Download PDF from release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ github.ref_name }}"
-          gh release download $TAG --pattern "*.pdf" --dir .
-          PDF_FILE=$(ls *.pdf | head -n 1)
-          echo "PDF_FILE=$PDF_FILE" >> $GITHUB_ENV
+    - name: Download archive
+      env:
+        tarball: ${{ github.event.release.tarball_url }}
+      run: |
+        name=$(basename ${tarball})
+        curl -L $tarball > $name
+        echo "archive=${name}" >> $GITHUB_ENV
 
-      - name: Create new Zenodo version
-        env:
-          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
-          ZENODO_DEPOSITION_ID: ${{ vars.ZENODO_DEPOSITION_ID }}
-        run: |
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer $ZENODO_PAT" \
-            https://zenodo.org/api/deposit/depositions/$ZENODO_DEPOSITION_ID/actions/newversion)
-          FLAT=$(echo "$RESPONSE" | tr -d '\n\r')
-          NEW_DEPOSITION_ID=$(echo "$FLAT" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
-          NEW_BUCKET_URL=$(echo "$FLAT" | grep -o '"bucket":"[^"]*"' | head -1 | sed 's/"bucket":"//;s/"$//')
-          if [ -z "$NEW_DEPOSITION_ID" ]; then
-            echo "Failed to create new version. Response: $RESPONSE"
-            exit 1
-          fi
-          echo "NEW_DEPOSITION_ID=$NEW_DEPOSITION_ID" >> $GITHUB_ENV
-          echo "NEW_BUCKET_URL=$NEW_BUCKET_URL" >> $GITHUB_ENV
-          FILES_RESPONSE=$(curl -s -H "Authorization: Bearer $ZENODO_PAT" \
-            https://zenodo.org/api/deposit/depositions/$NEW_DEPOSITION_ID/files)
-          FILE_IDS=$(echo "$FILES_RESPONSE" | grep -o '"id":[0-9]*' | sed 's/"id"://')
-          for FILE_ID in $FILE_IDS; do
-            curl -s -X DELETE \
-              -H "Authorization: Bearer $ZENODO_PAT" \
-              https://zenodo.org/api/deposit/depositions/$NEW_DEPOSITION_ID/files/$FILE_ID
-          done
+    - name: Extract clean title and version
+      id: extract
+      run: |
+        RELEASE_TITLE="${{ github.event.release.name }}"
+        VERSION="${{ github.ref_name }}"
+        CLEAN_TITLE=$(echo "$RELEASE_TITLE" | sed "s/ $VERSION$//")
+        echo "clean_title=$CLEAN_TITLE" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Upload PDF to Zenodo
-        env:
-          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
-        run: |
-          curl -s -X PUT \
-            -H "Authorization: Bearer $ZENODO_PAT" \
-            -H "Content-Type: application/pdf" \
-            --upload-file "${{ env.PDF_FILE }}" \
-            "$NEW_BUCKET_URL/${{ env.PDF_FILE }}"
-
-      - name: Extract version, title, and publication date
-        id: extract
-        run: |
-          TAG="${{ github.ref_name }}"
-          VERSION=$(echo "$TAG" | grep -o 'v[0-9.]*' | head -1)
-          RELEASE_TITLE=$(gh release view "$TAG" --json name | \
-            grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"$//')
-          PUB_TITLE=$(echo "$RELEASE_TITLE" | sed "s/ $VERSION$//")
-          if [[ "$PUB_TITLE" == *"Corporate Exploitation"* ]] ; then
-            PUB_DATE="2026-06-10"
-          else
-            PUB_DATE=$(echo "$VERSION" | sed 's/v//' | sed 's/\./-/g')
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "title=$PUB_TITLE" >> $GITHUB_OUTPUT
-          echo "pub_date=$PUB_DATE" >> $GITHUB_OUTPUT
-
-      - name: Update metadata
-        env:
-          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
-        run: |
-          curl -s -X PUT \
-            -H "Authorization: Bearer $ZENODO_PAT" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "metadata": {
-                "title": "${{ steps.extract.outputs.title }}",
-                "publication_date": "${{ steps.extract.outputs.pub_date }}",
-                "version": "${{ steps.extract.outputs.version }}"
-              }
-            }' \
-            https://zenodo.org/api/deposit/depositions/$NEW_DEPOSITION_ID
-
-      - name: Publish new version
-        env:
-          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
-        run: |
-          curl -s -X POST \
-            -H "Authorization: Bearer $ZENODO_PAT" \
-            https://zenodo.org/api/deposit/depositions/$NEW_DEPOSITION_ID/actions/publish
+    - name: Run Zenodo Deploy
+      uses: rseng/zenodo-release@a9c88701a0176df755015f8ca4cf8cc754162f27 # v0.0.21
+      with:
+        token: ${{ secrets.ZENODO_TOKEN }}
+        version: ${{ steps.extract.outputs.version }}
+        zenodo_json: .zenodo.json
+        archive: ${{ env.archive }}
+        doi: '10.5281/zenodo.21742982'
+        title: ${{ steps.extract.outputs.clean_title }}
