@@ -16,8 +16,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE_ID="${{ github.event.release.id }}"
-          gh release download $RELEASE_ID --pattern "*.pdf" --dir .
+          TAG="${{ github.ref_name }}"
+          gh release download $TAG --pattern "*.pdf" --dir .
           PDF_FILE=$(ls *.pdf | head -n 1)
           echo "PDF_FILE=$PDF_FILE" >> $GITHUB_ENV
 
