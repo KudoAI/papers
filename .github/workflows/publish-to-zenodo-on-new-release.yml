@@ -16,7 +16,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE_ID=$(gh release view --json id --jq '.id')
+          RELEASE_ID=$(gh release view --json id | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"$//')
           gh release download $RELEASE_ID --pattern "*.pdf" --dir .
           PDF_FILE=$(ls *.pdf | head -n 1)
           echo "PDF_FILE=$PDF_FILE" >> $GITHUB_ENV
