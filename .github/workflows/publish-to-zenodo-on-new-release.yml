@@ -29,9 +29,17 @@ jobs:
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $ZENODO_PAT" \
             https://zenodo.org/api/deposit/depositions/$ZENODO_DEPOSITION_ID/actions/newversion)
-          CLEAN_RESP=$(echo "$RESPONSE" | tr -d '\n')
-          NEW_DEPOSITION_ID=$(echo "$CLEAN_RESP" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
-          NEW_BUCKET_URL=$(echo "$CLEAN_RESP" | grep -o '"bucket":"[^"]*"' | head -1 | sed 's/"bucket":"//;s/"$//')
+          echo "$RESPONSE"
+          FLAT=$(echo "$RESPONSE" | tr -d '\n\r')
+          NEW_DEPOSITION_ID=$(echo "$FLAT" | grep -o '"id":[0-9]*' | head -1 | sed 's/"id"://')
+          NEW_BUCKET_URL=$(echo "$FLAT" | grep -o '"bucket":"[^"]*"' | head -1 | sed 's/"bucket":"//;s/"$//')
+          if [ -z "$NEW_BUCKET_URL" ]; then
+            NEW_BUCKET_URL=$(echo "$FLAT" | grep -o 'https://[^"]*' | grep -E 'zenodo.*bucket' | head -1)
+          fi
+          if [ -z "$NEW_DEPOSITION_ID" ] || [ -z "$NEW_BUCKET_URL" ]; then
+            echo "Extraction failed. Check logs for response."
+            exit 1
+          fi
           echo "NEW_DEPOSITION_ID=$NEW_DEPOSITION_ID" >> $GITHUB_ENV
           echo "NEW_BUCKET_URL=$NEW_BUCKET_URL" >> $GITHUB_ENV
 
