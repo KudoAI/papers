@@ -49,14 +49,16 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           VERSION=$(echo "$TAG" | grep -o 'v[0-9.]*' | head -1)
-          TITLE=$(echo "$TAG" | sed "s/-$VERSION$//" | sed 's/^corporate-greed-//' | sed 's/-/ /g')
-          if [[ "$TAG" == *"corporate-greed"* ]] ; then
+          RELEASE_TITLE=$(gh release view "$TAG" --json name | \
+            grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"$//')
+          PUB_TITLE=$(echo "$RELEASE_TITLE" | sed "s/ $VERSION$//")
+          if [[ "$PUB_TITLE" == *"Corporate Exploitation"* ]] ; then
             PUB_DATE="2026-06-10"
           else
             PUB_DATE=$(echo "$VERSION" | sed 's/v//' | sed 's/\./-/g')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "title=$PUB_TITLE" >> $GITHUB_OUTPUT
           echo "pub_date=$PUB_DATE" >> $GITHUB_OUTPUT
 
       - name: Update metadata
