@@ -1,0 +1,84 @@
+name: Publish to Zenodo on new release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download PDF from release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_ID=$(gh release view --json id --jq '.id')
+          gh release download $RELEASE_ID --pattern "*.pdf" --dir .
+          PDF_FILE=$(ls *.pdf | head -n 1)
+          echo "PDF_FILE=$PDF_FILE" >> $GITHUB_ENV
+
+      - name: Create new Zenodo version
+        env:
+          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
+          ZENODO_DEPOSITION_ID: ${{ vars.ZENODO_DEPOSITION_ID }}
+        run: |
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $ZENODO_PAT" \
+            https://zenodo.org/api/deposit/depositions/$ZENODO_DEPOSITION_ID/actions/newversion)
+          NEW_DEPOSITION_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+          NEW_BUCKET_URL=$(echo "$RESPONSE" | grep -o '"bucket":"[^"]*"' | head -1 | sed 's/"bucket":"//;s/"//')
+          echo "NEW_DEPOSITION_ID=$NEW_DEPOSITION_ID" >> $GITHUB_ENV
+          echo "NEW_BUCKET_URL=$NEW_BUCKET_URL" >> $GITHUB_ENV
+
+      - name: Upload PDF to Zenodo
+        env:
+          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
+        run: |
+          curl -s -X PUT \
+            -H "Authorization: Bearer $ZENODO_PAT" \
+            -H "Content-Type: application/pdf" \
+            --upload-file "${{ env.PDF_FILE }}" \
+            "$NEW_BUCKET_URL/${{ env.PDF_FILE }}"
+
+      - name: Extract version, title, and publication date
+        id: extract
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION=$(echo "$TAG" | grep -o 'v[0-9.]*' | head -1)
+          TITLE=$(echo "$TAG" | sed "s/-$VERSION$//" | sed 's/^corporate-greed-//' | sed 's/-/ /g')
+          if [[ "$TAG" == *"corporate-greed"* ]] ; then
+            PUB_DATE="2026-06-10"
+          else
+            PUB_DATE=$(echo "$VERSION" | sed 's/v//' | sed 's/\./-/g')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "pub_date=$PUB_DATE" >> $GITHUB_OUTPUT
+
+      - name: Update metadata
+        env:
+          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
+        run: |
+          curl -s -X PUT \
+            -H "Authorization: Bearer $ZENODO_PAT" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "metadata": {
+                "title": "${{ steps.extract.outputs.title }}",
+                "publication_date": "${{ steps.extract.outputs.pub_date }}",
+                "version": "${{ steps.extract.outputs.version }}"
+              }
+            }' \
+            https://zenodo.org/api/deposit/depositions/$NEW_DEPOSITION_ID
+
+      - name: Publish new version
+        env:
+          ZENODO_PAT: ${{ secrets.ZENODO_PAT }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer $ZENODO_PAT" \
+            https://zenodo.org/api/deposit/depositions/$NEW_DEPOSITION_ID/actions/publish
