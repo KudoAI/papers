@@ -1,40 +1,41 @@
-name: Publish to Zenodo on new release
+name: Publish to Zenodo on new release github-exploits-foss tag
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["github-exploits-foss-*"]
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Download archive
-      env:
-        tarball: ${{ github.event.release.tarball_url }}
+    - name: Get tag and version
+      id: tag
       run: |
-        name=$(basename ${tarball})
-        curl -L $tarball > $name
-        echo "archive=${name}" >> $GITHUB_ENV
+        TAG="${{ github.ref_name }}"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "version=$(echo "$TAG" | grep -o 'v[0-9.]*' | head -1)" >> $GITHUB_OUTPUT
 
-    - name: Extract clean title and version
-      id: extract
+    - name: Download archive from GitHub
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
-        RELEASE_TITLE="${{ github.event.release.name }}"
-        VERSION=$(echo "${{ github.ref_name }}" | grep -o 'v[0-9.]*' | head -1)
-        CLEAN_TITLE=$(echo "$RELEASE_TITLE" | sed "s/ $VERSION$//")
-        echo "clean_title=$CLEAN_TITLE" >> $GITHUB_OUTPUT
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        gh release download "${{ steps.tag.outputs.tag }}" --pattern "*.pdf" --dir .
+        echo "PDF_FILE=$(ls *.pdf | head -n 1)" >> $GITHUB_ENV
+
+    - name: Download source archive
+      run: |
+        curl -L "https://github.com/${{ github.repository }}/archive/${{ steps.tag.outputs.tag }}.tar.gz" \
+          -o source.tar.gz
+        echo "ARCHIVE=source.tar.gz" >> $GITHUB_ENV
 
     - name: Run Zenodo Deploy
       uses: rseng/zenodo-release@a9c88701a0176df755015f8ca4cf8cc754162f27 # v0.0.21
       with:
         token: ${{ secrets.ZENODO_PAT }}
-        version: ${{ steps.extract.outputs.version }}
-        zenodo_json: .zenodo.json
-        archive: ${{ env.archive }}
-        doi: '10.5281/zenodo.21742982'
-        title: ${{ steps.extract.outputs.clean_title }}
+        version: ${{ steps.tag.outputs.version }}
+        archive: ${{ env.ARCHIVE }}
+        title: 'Corporate Exploitation of Open-Source Innovation in AI by GitHub Employees'
+        doi: '10.5281/zenodo.21742981'
